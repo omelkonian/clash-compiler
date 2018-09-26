@@ -31,6 +31,7 @@ import           Data.List                        (elemIndex, sortOn)
 import           Data.Maybe
   (catMaybes, fromMaybe, listToMaybe)
 import           Data.Primitive.ByteArray         (ByteArray (..))
+import qualified Data.Set                         as Set
 import qualified Data.Text                        as StrictText
 import qualified Data.Text.Lazy                   as Text
 import qualified Data.Vector.Primitive            as PV
@@ -91,7 +92,7 @@ genNetlist :: CustomReprs
            -- ^ valid identifiers
            -> (IdType -> Identifier -> Identifier -> Identifier)
            -- ^ extend valid identifiers
-           -> [Identifier]
+           -> Set.Set Identifier
            -- ^ Seen components
            -> FilePath
            -- ^ HDL dir
@@ -99,7 +100,7 @@ genNetlist :: CustomReprs
            -- ^ Component name prefix
            -> TmOccName
            -- ^ Name of the @topEntity@
-           -> IO ([(SrcSpan,[Identifier],Component)],[Identifier])
+           -> IO ([(SrcSpan,Set.Set Identifier,Component)],Set.Set Identifier)
 genNetlist reprs globals tops primMap tcm typeTrans iw mkId extId seen env prefixM topEntity = do
   (_,s) <- runNetlistMonad reprs globals (mkTopEntityMap tops) primMap tcm typeTrans
              iw mkId extId seen env prefixM $ genComponent topEntity
@@ -130,7 +131,7 @@ runNetlistMonad :: CustomReprs
                 -- ^ valid identifiers
                 -> (IdType -> Identifier -> Identifier -> Identifier)
                 -- ^ extend valid identifiers
-                -> [Identifier]
+                -> Set.Set Identifier
                 -- ^ Seen components
                 -> FilePath
                 -- ^ HDL dir
@@ -144,20 +145,20 @@ runNetlistMonad reprs s tops p tcm typeTrans iw mkId extId seenIds_ env prefixM
   . flip runStateT s'
   . runNetlist
   where
-    s' = NetlistState s 0 HashMap.empty p typeTrans tcm (Text.empty,noSrcSpan) iw mkId extId [] seenIds' names tops env 0 prefixM reprs
+    s' = NetlistState s 0 HashMap.empty p typeTrans tcm (Text.empty,noSrcSpan) iw mkId extId Set.empty seenIds' names tops env 0 prefixM reprs
     (seenIds',names) = genNames mkId prefixM seenIds_ HashMap.empty (HashMap.elems (HashMap.map (^. _1) s))
 
 genNames :: (IdType -> Identifier -> Identifier)
          -> (Maybe Identifier,Maybe Identifier)
-         -> [Identifier]
+         -> Set.Set Identifier
          -> HashMap TmOccName Identifier
          -> [TmName]
-         -> ([Identifier], HashMap TmOccName Identifier)
+         -> (Set.Set Identifier, HashMap TmOccName Identifier)
 genNames mkId prefixM = go
   where
     go s m []       = (s,m)
     go s m (nm:nms) = let nm' = genComponentName s mkId prefixM nm
-                          s'  = nm':s
+                          s'  = Set.insert nm' s
                           m'  = HashMap.insert (nameOcc nm) nm' m
                       in  go s' m' nms
 
@@ -165,7 +166,7 @@ genNames mkId prefixM = go
 genComponent
   :: TmOccName
   -- ^ Name of the function
-  -> NetlistMonad (SrcSpan,[Identifier],Component)
+  -> NetlistMonad (SrcSpan,Set.Set Identifier,Component)
 genComponent compName = do
   compExprM <- fmap (HashMap.lookup compName) $ Lens.use bindings
   case compExprM of
@@ -181,7 +182,7 @@ genComponentT
   -- ^ Name of the function
   -> Term
   -- ^ Corresponding term
-  -> NetlistMonad (SrcSpan,[Identifier],Component)
+  -> NetlistMonad (SrcSpan,Set.Set Identifier,Component)
 genComponentT compName componentExpr = do
   varCount .= 0
   componentName1 <- (HashMap.! compName) <$> Lens.use componentNames
@@ -201,7 +202,7 @@ genComponentT compName componentExpr = do
   -- any attributes [see: Clash.Annotations.SynthesisAttributes]).
   topEntityType <- ((fst <$>) . HashMap.lookup compName) <$> Lens.use topEntityAnns
 
-  seenIds .= []
+  seenIds .= Set.empty
   (compInps,argWrappers,compOutps,resUnwrappers,binders,resultM) <- do
     normalizedM <- splitNormalized tcm componentExpr
     case normalizedM of

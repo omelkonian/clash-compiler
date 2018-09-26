@@ -36,6 +36,7 @@ import           Data.Maybe                           (catMaybes,fromMaybe,mapMa
 import           Data.Monoid                          hiding (Sum, Product)
 #endif
 import           Data.Semigroup.Monad.Extra
+import qualified Data.Set                             as Set
 import           Data.Text.Lazy                       (unpack)
 import qualified Data.Text.Lazy                       as T
 import           Data.Text.Prettyprint.Doc.Extra
@@ -83,7 +84,7 @@ data VHDLState =
   , _memoryDataFiles:: [(String,String)]
   -- ^ Files to be stored: (filename, contents). These files are generated
   -- during the execution of 'genNetlist'.
-  , _idSeen    :: [Identifier]
+  , _idSeen    :: Set.Set Identifier
   , _intWidth  :: Int                  -- ^ Int/Word/Integer bit-width
   , _hdlsyn    :: HdlSyn               -- ^ For which HDL synthesis tool are we generating VHDL
   }
@@ -101,7 +102,7 @@ primsRoot = return ("clash-lib" System.FilePath.</> "prims")
 #endif
 
 instance Backend VHDLState where
-  initBackend     = VHDLState HashSet.empty [] HashMap.empty "" noSrcSpan [] [] [] [] [] []
+  initBackend     = VHDLState HashSet.empty [] HashMap.empty "" noSrcSpan [] [] [] [] [] Set.empty
   hdlKind         = const VHDL
   primDirs        = const $ do root <- primsRoot
                                return [ root System.FilePath.</> "common"
@@ -190,8 +191,9 @@ type VHDLM a = Mon (State VHDLState) a
 -- + used internal names: toslv, fromslv, tagtoenum, datatotag
 -- + used IEEE library names: integer, boolean, std_logic, std_logic_vector,
 --   signed, unsigned, to_integer, to_signed, to_unsigned, string
-reservedWords :: [Identifier]
-reservedWords = ["abs","access","after","alias","all","and","architecture"
+reservedWords :: Set.Set Identifier
+reservedWords = Set.fromList [
+   "abs","access","after","alias","all","and","architecture"
   ,"array","assert","assume","assume_guarantee","attribute","begin","block"
   ,"body","buffer","bus","case","component","configuration","constant","context"
   ,"cover","default","disconnect","downto","else","elsif","end","entity","exit"
@@ -209,12 +211,17 @@ reservedWords = ["abs","access","after","alias","all","and","architecture"
   ,"to_integer", "to_signed", "to_unsigned", "string"]
 
 filterReserved :: Identifier -> Identifier
-filterReserved s = if s `elem` reservedWords
+filterReserved s = if s `Set.member` reservedWords
   then s `T.append` "_r"
   else s
 
 -- | Generate VHDL for a Netlist component
-genVHDL :: String -> SrcSpan -> [Identifier] -> Component -> VHDLM ((String,Doc),[(String,Doc)])
+genVHDL
+  :: String
+  -> SrcSpan
+  -> Set.Set Identifier
+  -> Component
+  -> VHDLM ((String,Doc),[(String,Doc)])
 genVHDL nm sp seen c = preserveSeen $ do
     Mon $ idSeen .= seen
     Mon $ setSrcSpan sp

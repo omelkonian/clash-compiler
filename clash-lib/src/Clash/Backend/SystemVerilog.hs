@@ -34,6 +34,7 @@ import           Data.Maybe                           (catMaybes,fromMaybe,mapMa
 import           Data.Monoid                          hiding (Sum, Product)
 #endif
 import           Data.Semigroup.Monad
+import qualified Data.Set                             as Set
 import           Data.Text.Lazy                       (pack,unpack,intercalate)
 import qualified Data.Text.Lazy                       as Text
 import           Data.Text.Prettyprint.Doc.Extra
@@ -75,7 +76,7 @@ data SystemVerilogState =
     , _nameCache :: HashMap HWType Doc -- ^ Cache for previously generated product type names
     , _genDepth  :: Int -- ^ Depth of current generative block
     , _modNm     :: String
-    , _idSeen    :: [Identifier]
+    , _idSeen    :: Set.Set Identifier
     , _oports    :: [Identifier]
     , _srcSpan   :: SrcSpan
     , _includes  :: [(String,Doc)]
@@ -102,7 +103,7 @@ primsRoot = return ("clash-lib" System.FilePath.</> "prims")
 #endif
 
 instance Backend SystemVerilogState where
-  initBackend     = SystemVerilogState HashSet.empty [] HashMap.empty 0 "" [] [] noSrcSpan [] [] [] []
+  initBackend     = SystemVerilogState HashSet.empty [] HashMap.empty 0 "" Set.empty [] noSrcSpan [] [] [] []
   hdlKind         = const SystemVerilog
   primDirs        = const $ do root <- primsRoot
                                return [ root System.FilePath.</> "common"
@@ -185,8 +186,9 @@ rmSlash nm = fromMaybe nm $ do
 type SystemVerilogM a = Mon (State SystemVerilogState) a
 
 -- List of reserved SystemVerilog-2012 keywords
-reservedWords :: [Identifier]
-reservedWords = ["accept_on","alias","always","always_comb","always_ff"
+reservedWords :: Set.Set Identifier
+reservedWords = Set.fromList [
+   "accept_on","alias","always","always_comb","always_ff"
   ,"always_latch","and","assert","assign","assume","automatic","before","begin"
   ,"bind","bins","binsof","bit","break","buf","bufif0","bufif1","byte","case"
   ,"casex","casez","cell","chandle","checker","class","clocking","cmos","config"
@@ -221,12 +223,17 @@ reservedWords = ["accept_on","alias","always","always_comb","always_ff"
   ,"weak1","while","wildcard","wire","with","within","wor","xnor","xor"]
 
 filterReserved :: Identifier -> Identifier
-filterReserved s = if s `elem` reservedWords
+filterReserved s = if s `Set.member` reservedWords
   then s `Text.append` "_r"
   else s
 
 -- | Generate SystemVerilog for a Netlist component
-genVerilog :: String -> SrcSpan -> [Identifier] -> Component -> SystemVerilogM ((String,Doc),[(String,Doc)])
+genVerilog
+  :: String
+  -> SrcSpan
+  -> Set.Set Identifier
+  -> Component
+  -> SystemVerilogM ((String,Doc),[(String,Doc)])
 genVerilog _ sp seen c = preserveSeen $ do
     Mon $ idSeen .= seen
     Mon $ setSrcSpan sp
@@ -559,7 +566,7 @@ addSeen c = do
   let iport = map fst (inputs c)
       oport = map (fst.snd) $ outputs c
       nets  = mapMaybe (\case {NetDecl' _ _ i _ -> Just i; _ -> Nothing}) $ declarations c
-  Mon (idSeen .= concat [iport,oport,nets])
+  Mon (idSeen .= Set.fromList (concat [iport,oport,nets]))
   Mon (oports .= oport)
 
 mkUniqueId :: Identifier -> SystemVerilogM Identifier
@@ -567,18 +574,22 @@ mkUniqueId i = do
   mkId <- Mon (mkIdentifier <*> pure Extended)
   seen <- Mon $ use idSeen
   let i' = mkId i
-  case i `elem` seen of
+  case i `Set.member` seen of
     True  -> go mkId seen i' 0
-    False -> do Mon (idSeen %= (i':))
+    False -> do Mon (idSeen %= Set.insert i')
                 return i'
   where
-    go :: (Identifier -> Identifier) -> [Identifier] -> Identifier
-       -> Int -> SystemVerilogM Identifier
+    go
+      :: (Identifier -> Identifier)
+      -> Set.Set Identifier
+      -> Identifier
+      -> Int
+      -> SystemVerilogM Identifier
     go mkId seen i' n = do
       let i'' = mkId (Text.append i' (Text.pack ('_':show n)))
-      case i'' `elem` seen of
+      case i'' `Set.member` seen of
         True  -> go mkId seen i' (n+1)
-        False -> do Mon (idSeen %= (i'':))
+        False -> do Mon (idSeen %= Set.insert i'')
                     return i''
 
 verilogType :: HWType -> SystemVerilogM Doc

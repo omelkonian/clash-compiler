@@ -35,6 +35,7 @@ import Data.Binary                          (Binary(..))
 import Data.Hashable
 import Data.HashMap.Lazy                    (HashMap)
 import Data.IntMap.Lazy                     (IntMap, empty)
+import qualified Data.Set                   as Set
 import qualified Data.Text                  as S
 import Data.Text.Lazy                       (Text, pack)
 import Data.Typeable                        (Typeable)
@@ -72,7 +73,7 @@ data NetlistState
   = NetlistState
   { _bindings       :: BindingMap -- ^ Global binders
   , _varCount       :: !Int -- ^ Number of signal declarations
-  , _components     :: HashMap TmOccName (SrcSpan,[Identifier],Component) -- ^ Cached components
+  , _components     :: HashMap TmOccName (SrcSpan,Set.Set Identifier,Component) -- ^ Cached components
   , _primitives     :: CompiledPrimMap -- ^ Primitive Definitions
   , _typeTranslator :: CustomReprs -> HashMap TyConOccName TyCon -> Bool -> Type -> Maybe (Either String HWType)
   -- ^ Hardcoded Type -> HWType translator
@@ -81,8 +82,8 @@ data NetlistState
   , _intWidth       :: Int
   , _mkIdentifierFn :: IdType -> Identifier -> Identifier
   , _extendIdentifierFn :: IdType -> Identifier -> Identifier -> Identifier
-  , _seenIds        :: [Identifier]
-  , _seenComps      :: [Identifier]
+  , _seenIds        :: Set.Set Identifier
+  , _seenComps      :: Set.Set Identifier
   , _componentNames :: HashMap TmOccName Identifier
   , _topEntityAnns  :: HashMap TmOccName (Type, Maybe TopEntity)
   , _hdlDir         :: FilePath

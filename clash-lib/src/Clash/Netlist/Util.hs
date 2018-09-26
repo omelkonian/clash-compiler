@@ -28,6 +28,7 @@ import           Data.HashMap.Strict     (HashMap)
 import qualified Data.HashMap.Strict     as HashMap
 import           Data.List               (intersperse, unzip4, sort)
 import           Data.Maybe              (catMaybes,fromMaybe)
+import qualified Data.Set                as Set
 import           Data.Text.Lazy          (append,pack,unpack)
 import qualified Data.Text.Lazy          as Text
 import           Unbound.Generics.LocallyNameless
@@ -629,20 +630,20 @@ mkUniqueIdentifier typ nm = do
   seen  <- Lens.use seenIds
   seenC <- Lens.use seenComps
   i     <- mkIdentifier typ nm
-  let s = seenC ++ seen
-  if i `elem` s
+  let s = Set.union seenC seen
+  if i `Set.member` s
      then go 0 s i
      else do
-      seenIds %= (i:)
+      seenIds %= Set.insert i
       return i
   where
-    go :: Integer -> [Identifier] -> Identifier -> NetlistMonad Identifier
+    go :: Integer -> Set.Set Identifier -> Identifier -> NetlistMonad Identifier
     go n s i = do
       i' <- extendIdentifier typ i (pack ('_':show n))
-      if i' `elem` s
+      if i' `Set.member` s
          then go (n+1) s i
          else do
-          seenIds %= (i':)
+          seenIds %= Set.insert i'
           return i'
 
 -- | Preserve the Netlist '_varEnv' and '_varCount' when executing a monadic action
@@ -699,7 +700,7 @@ uniquePortName
 uniquePortName [] i = mkUniqueIdentifier Extended i
 uniquePortName x  _ = do
   let x' = pack x
-  seenIds %= (x':)
+  seenIds %= Set.insert x'
   return x'
 
 mkInput
@@ -878,7 +879,7 @@ mkRTreeChain d elTy es =
         ]
 
 genComponentName
-  :: [Identifier]
+  :: Set.Set Identifier
   -> (IdType -> Identifier -> Identifier)
   -> (Maybe Identifier,Maybe Identifier)
   -> TmName
@@ -890,12 +891,12 @@ genComponentName seen mkId prefixM nm =
       prefix = maybe id (:) (snd prefixM) (init nm')
       nm2 = Text.concat (intersperse (Text.pack "_") (prefix ++ [fn']))
       nm3 = mkId Basic nm2
-  in  if nm3 `elem` seen then go 0 nm3 else nm3
+  in  if nm3 `Set.member` seen then go 0 nm3 else nm3
   where
     go :: Integer -> Identifier -> Identifier
     go n i =
       let i' = mkId Basic (i `Text.append` Text.pack ('_':show n))
-      in  if i' `elem` seen
+      in  if i' `Set.member` seen
              then go (n+1) i
              else i'
 
@@ -910,7 +911,7 @@ genTopComponentName _mkId prefixM (Just ann) _nm =
     (Just p,_) -> p `Text.append` Text.pack ('_':t_name ann)
     _          -> Text.pack (t_name ann)
 genTopComponentName mkId prefixM Nothing nm =
-  genComponentName [] mkId prefixM nm
+  genComponentName Set.empty mkId prefixM nm
 
 
 -- | Strips one or more layers of attributes from a HWType; stops at first

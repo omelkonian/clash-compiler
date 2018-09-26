@@ -38,6 +38,7 @@ import           Data.List                            (nub, nubBy)
 import           Data.Monoid                          hiding (Product, Sum)
 #endif
 import           Data.Semigroup.Monad
+import qualified Data.Set                             as Set
 import           Data.Text.Lazy                       (pack, unpack, intercalate)
 import qualified Data.Text.Lazy                       as Text
 import           Data.Text.Prettyprint.Doc.Extra
@@ -78,7 +79,7 @@ import qualified Paths_clash_lib
 data VerilogState =
   VerilogState
     { _genDepth  :: Int -- ^ Depth of current generative block
-    , _idSeen    :: [Identifier]
+    , _idSeen    :: Set.Set Identifier
     , _srcSpan   :: SrcSpan
     , _includes  :: [(String,Doc)]
     , _imports   :: [Text.Text]
@@ -104,7 +105,7 @@ primsRoot = return ("clash-lib" System.FilePath.</> "prims")
 #endif
 
 instance Backend VerilogState where
-  initBackend     = VerilogState 0 [] noSrcSpan [] [] [] []
+  initBackend     = VerilogState 0 Set.empty noSrcSpan [] [] [] []
   hdlKind         = const Verilog
   primDirs        = const $ do root <- primsRoot
                                return [ root System.FilePath.</> "common"
@@ -187,8 +188,9 @@ rmSlash nm = fromMaybe nm $ do
 type VerilogM a = Mon (State VerilogState) a
 
 -- List of reserved Verilog-2005 keywords
-reservedWords :: [Identifier]
-reservedWords = ["always","and","assign","automatic","begin","buf","bufif0"
+reservedWords :: Set.Set Identifier
+reservedWords = Set.fromList [
+   "always","and","assign","automatic","begin","buf","bufif0"
   ,"bufif1","case","casex","casez","cell","cmos","config","deassign","default"
   ,"defparam","design","disable","edge","else","end","endcase","endconfig"
   ,"endfunction","endgenerate","endmodule","endprimitive","endspecify"
@@ -206,12 +208,12 @@ reservedWords = ["always","and","assign","automatic","begin","buf","bufif0"
   ,"wait","wand","weak0","weak1","while","wire","wor","xnor","xor"]
 
 filterReserved :: Identifier -> Identifier
-filterReserved s = if s `elem` reservedWords
+filterReserved s = if s `Set.member` reservedWords
   then s `Text.append` "_r"
   else s
 
 -- | Generate VHDL for a Netlist component
-genVerilog :: SrcSpan -> [Identifier] -> Component -> VerilogM ((String,Doc),[(String,Doc)])
+genVerilog :: SrcSpan -> Set.Set Identifier -> Component -> VerilogM ((String,Doc),[(String,Doc)])
 genVerilog sp seen c = preserveSeen $ do
     Mon (idSeen .= seen)
     Mon (setSrcSpan sp)
@@ -293,7 +295,7 @@ addSeen c = do
   let iport = [iName | (iName, _) <- inputs c]
       oport = [oName | (_, (oName, _)) <- outputs c]
       nets  = mapMaybe (\case {NetDecl' _ _ i _ -> Just i; _ -> Nothing}) $ declarations c
-  Mon $ idSeen .= concat [iport,oport,nets]
+  Mon $ idSeen .= Set.fromList (concat [iport,oport,nets])
 
 -- render a type; by default, removing zero-sizes is an aesthetic operation
 -- and is only valid for decls (e.g. when rendering module ports), so don't

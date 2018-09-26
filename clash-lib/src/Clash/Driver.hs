@@ -30,6 +30,7 @@ import           Data.IntMap                      (IntMap)
 import           Data.List                        (intercalate)
 import           Data.Maybe                       (fromMaybe)
 import           Data.Semigroup.Monad
+import qualified Data.Set                         as Set
 import qualified Data.Text
 import           Data.Text.Lazy                   (Text)
 import qualified Data.Text.Lazy                   as Text
@@ -109,7 +110,7 @@ generateHDL
   -> (Clock.UTCTime,Clock.UTCTime)
   -> IO ()
 generateHDL reprs bindingsMap hdlState primMap tcm tupTcm typeTrans eval topEntities
-  opts (startTime,prepTime) = go prepTime [] topEntities where
+  opts (startTime,prepTime) = go prepTime Set.empty topEntities where
 
   -- No more TopEntities to process
   go prevTime _ [] = putStrLn $ "Total compilation took " ++
@@ -183,7 +184,7 @@ generateHDL reprs bindingsMap hdlState primMap tcm tupTcm typeTrans eval topEnti
     then do
       putStrLn ("Using cached result for: " ++ name2String topEntity)
       topTime <- Clock.getCurrentTime
-      return (topTime,manifest,componentNames manifest ++ seen)
+      return (topTime,manifest,Set.union (Set.fromList (componentNames manifest)) seen)
     else do
       -- 1. Normalise topEntity
       let transformedBindings = normalizeEntity reprs bindingsMap primMap tcm tupTcm
@@ -220,7 +221,7 @@ generateHDL reprs bindingsMap hdlState primMap tcm tupTcm typeTrans eval topEnti
     Just tb | not sameBenchHash -> do
       putStrLn $ "Compiling: " ++ name2String tb
 
-      let modName'  = Text.unpack (genComponentName [] mkId prefixM tb)
+      let modName'  = Text.unpack (genComponentName Set.empty mkId prefixM tb)
           hdlState2 = setModName modName' hdlState'
 
       -- 1. Normalise testBench
@@ -388,9 +389,9 @@ createHDL
   -- ^ Backend
   -> String
   -- ^ Module hierarchy root
-  -> [Identifier]
+  -> Set.Set Identifier
   -- ^ Component names
-  -> [(SrcSpan,[Identifier],Component)]
+  -> [(SrcSpan,Set.Set Identifier,Component)]
   -- ^ List of components
   -> Component
   -- ^ Top component
@@ -404,7 +405,7 @@ createHDL
   -- + The update manifest file
   -- + The data files that need to be copied
 createHDL backend modName seen components top (topName,manifestE) = flip evalState backend $ getMon $ do
-  (hdlNmDocs,incs) <- unzip <$> mapM (\(sp,ids,comp) -> genHDL modName sp (seen ++ ids) comp) components
+  (hdlNmDocs,incs) <- unzip <$> mapM (\(sp,ids,comp) -> genHDL modName sp (Set.union seen ids) comp) components
   hwtys <- HashSet.toList <$> extractTypes <$> Mon get
   typesPkg <- mkTyPackage modName hwtys
   dataFiles <- Mon getDataFiles

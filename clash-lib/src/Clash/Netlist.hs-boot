@@ -14,6 +14,8 @@ module Clash.Netlist
   ,mkSelection
   ) where
 
+import qualified Data.Set   as Set
+
 import Clash.Core.DataCon   (DataCon)
 import Clash.Core.Term      (Alt,LetBinding,Term,TmOccName)
 import Clash.Core.Type      (Type)
@@ -23,7 +25,7 @@ import Clash.Netlist.Types  (Expr, HWType, Identifier, NetlistMonad, Component,
                              Declaration)
 
 genComponent :: TmOccName
-             -> NetlistMonad (SrcSpan,[Identifier],Component)
+             -> NetlistMonad (SrcSpan,Set.Set Identifier,Component)
 
 mkExpr :: Bool
        -> Either Identifier Id
