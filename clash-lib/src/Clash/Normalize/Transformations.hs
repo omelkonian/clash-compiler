@@ -825,7 +825,7 @@ inlineWorkFree (TransformContext localScope _) e@(collectArgs -> (Var f,args))
         bndrs <- Lens.use bindings
         case lookupVarEnv f bndrs of
           -- Don't inline recursive expressions
-          Just (_,_,inl,body) | inl /= NoInline -> do
+          Just (_,_,_,body) -> do
             isRecBndr <- isRecursiveBndr f
             if isRecBndr
                then return e
@@ -854,7 +854,7 @@ inlineWorkFree (TransformContext localScope _) e@(Var f) = do
       bndrs <- Lens.use bindings
       case lookupVarEnv f bndrs of
         -- Don't inline recursive expressions
-        Just (_,_,inl,body) | inl /= NoInline -> do
+        Just (_,_,_,body) -> do
           isRecBndr <- isRecursiveBndr f
           if isRecBndr
              then return e
