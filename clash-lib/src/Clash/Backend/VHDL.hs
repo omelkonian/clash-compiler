@@ -67,6 +67,8 @@ import           Clash.Util
   (SrcSpan, noSrcSpan, clogBase, curLoc, first, makeCached, on, traceIf, (<:>))
 import           Clash.Util.Graph                     (reverseTopSort)
 
+import Debug.Trace
+
 #ifdef CABAL
 import qualified Paths_clash_lib
 #endif
@@ -313,6 +315,9 @@ selectProductField
 selectProductField fieldLabels fieldTypes fieldIndex =
   "_sel" <> int fieldIndex <> "_" <> productFieldName fieldLabels fieldTypes fieldIndex
 
+selectSumField
+  ::
+
 -- | Generate VHDL for a Netlist component
 genVHDL :: Identifier -> SrcSpan -> [Identifier] -> Component -> VHDLM ((String,Doc),[(String,Doc)])
 genVHDL nm sp seen c = preserveSeen $ do
@@ -376,7 +381,7 @@ mkTyPackage_ modName (map filterTransparent -> hwtys) = do
     eqTypM ty1 ty2                       = ty1 == ty2
 
 mkUsedTys :: HWType -> [HWType]
-mkUsedTys hwty = hwty : case hwty of
+mkUsedTys hwty = traceShowId hwty : case hwty of
   Vector _ elTy        -> mkUsedTys elTy
   RTree _ elTy         -> mkUsedTys elTy
   Product _ _ elTys    -> concatMap mkUsedTys elTys
@@ -488,11 +493,21 @@ tyDec hwty = do
                  <> semi
 
     Product _ labels tys@(_:_:_) ->
+      -- TODO: Check logic: are we actually generating unique selNames here?
       let selNames = map (\i -> tyName hwty <> selectProductField labels tys i) [0..] in
       let selTys   = map sizedQualTyName tys in
       "type" <+> tyName hwty <+> "is record" <> line  <>
         indent 2 (vcat $ zipWithM (\x y -> x <+> colon <+> y <> semi) selNames selTys) <> line <>
       "end record" <> semi
+
+    Sum nm labels -> do
+      mkId <- Mon (mkIdentifier <*> pure Basic)
+      let mkFieldName l = mkId (last (TextS.splitOn "." l))
+      let fieldNames = mapM (\l -> tyName hwty <> "_" <> pretty (mkId l)) labels
+      "type" <+> tyName hwty <+> "is" <+> parens (align (vcat $ punctuate ", " fieldNames)) <> colon
+
+    -- TODO:
+    CustomSum _ _ _ _ -> typAliasDec hwty
 
     -- Type aliases:
     Clock _ _ _       -> typAliasDec hwty
@@ -500,8 +515,6 @@ tyDec hwty = do
     Index _           -> typAliasDec hwty
     CustomSP _ _ _ _  -> typAliasDec hwty
     SP _ _            -> typAliasDec hwty
-    Sum _ _           -> typAliasDec hwty
-    CustomSum _ _ _ _ -> typAliasDec hwty
 
     -- VHDL builtin types:
     BitVector _ -> emptyDoc
@@ -1078,6 +1091,8 @@ normaliseType hwty = case hwty of
   Vector _ _    -> hwty
   RTree _ _     -> hwty
   Product _ _ _ -> hwty
+  Sum _ _       -> hwty
+  CustomSum {}  -> hwty
 
   -- Special case for gated clock, which is converted to a tuple:
   Clock nm _ Gated  ->
@@ -1089,8 +1104,6 @@ normaliseType hwty = case hwty of
   Index _           -> Unsigned (typeSize hwty)
   CustomSP _ _ _ _  -> BitVector (typeSize hwty)
   SP _ _            -> BitVector (typeSize hwty)
-  Sum _ _           -> BitVector (typeSize hwty)
-  CustomSum _ _ _ _ -> BitVector (typeSize hwty)
 
   -- Transparent types:
   Annotated _ elTy -> normaliseType elTy
@@ -1564,8 +1577,9 @@ expr_ _ (DataCon ty@(SP _ args) (DC (_,i)) es) = assignExpr
                    n -> [bits (replicate n U)]
     assignExpr = "std_logic_vector'" <> parens (hcat $ punctuate " & " $ sequence (dcExpr:argExprs ++ extraArg))
 
-expr_ _ (DataCon ty@(Sum _ _) (DC (_,i)) []) =
-  expr_ False (dcToExpr ty i)
+expr_ _ (DataCon ty@(Sum nm fieldNames) (DC (_,i)) []) = do
+  e <- sumDcToExpr nm fieldNames i
+  expr_ False e
 expr_ _ (DataCon ty@(CustomSum _ _ _ tys) (DC (_,i)) []) =
   let (ConstrRepr' _ _ _ value _) = fst $ tys !! i in
   "std_logic_vector" <> parens ("to_unsigned" <> parens (int (fromIntegral value) <> comma <> int (typeSize ty)))
@@ -1910,6 +1924,10 @@ fromSLV (Vector n elTy)     id_ start _   =
 fromSLV (Clock {})        id_ start _   = pretty id_ <> parens (int start)
 fromSLV (Reset {})        id_ start _   = pretty id_ <> parens (int start)
 fromSLV hty               _   _     _   = error $ $(curLoc) ++ "fromSLV: " ++ show hty
+
+sumDcToExpr :: Identifier -> [Identifier] -> Int -> VHDLM Expr
+sumDcToExpr nm fieldNames fieldN =
+
 
 dcToExpr :: HWType -> Int -> Expr
 dcToExpr ty i = Literal (Just (ty,conSize ty)) (NumLit (toInteger i))
