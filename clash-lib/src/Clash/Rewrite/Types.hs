@@ -12,10 +12,13 @@
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE DeriveAnyClass             #-}
+{-# LANGUAGE DeriveGeneric              #-}
 
 module Clash.Rewrite.Types where
 
 import Control.Concurrent.Supply             (Supply, freshId)
+import Control.DeepSeq                       (NFData)
 import Control.Lens                          (use, (.=))
 import Control.Monad
 import Control.Monad.Fail                    (MonadFail(fail))
@@ -23,8 +26,11 @@ import Control.Monad.Fix                     (MonadFix (..), fix)
 import Control.Monad.Reader                  (MonadReader (..))
 import Control.Monad.State                   (MonadState (..))
 import Control.Monad.Writer                  (MonadWriter (..))
+import Data.Binary                           (Binary)
+import Data.Hashable                         (Hashable)
 import Data.IntMap.Strict                    (IntMap)
 import Data.Monoid                           (Any)
+import GHC.Generics
 
 import SrcLoc (SrcSpan)
 
@@ -39,6 +45,29 @@ import Clash.Netlist.Types       (FilteredHWType)
 import Clash.Util
 
 import Clash.Annotations.BitRepresentation.Internal (CustomReprs)
+
+-- | State used by the inspection mechanism for the normalization phase.
+data RewriteStep
+  = RewriteStep
+  { t_ctx    :: Context
+  -- ^ current context
+  , t_name   :: String
+  -- ^ Name of the transformation
+  , t_bndrS  :: String
+  -- ^ Name of the current binder
+  , t_before :: Term
+  -- ^ Term before `apply`
+  , t_after  :: Term
+  -- ^ Term after `apply`
+  }
+  | InlineStep
+  { t_bndrS  :: String
+  -- ^ Target function, inside which we inline
+  , t_before :: Term
+  -- ^ Function before inlining
+  , t_after  :: Term
+  -- ^ Function after inlining
+  } deriving (Show, Generic, NFData, Hashable, Binary)
 
 -- | State of a rewriting session
 data RewriteState extra
@@ -55,6 +84,8 @@ data RewriteState extra
   -- ^ Used for 'Fresh'
   , _globalHeap       :: GlobalHeap
   -- ^ Used as a heap for compile-time evaluation of primitives that live in I/O
+  , _rewriteSteps     :: ![RewriteStep]
+  -- ^ Recorded steps during rewriting (used a-posteriori by clash-term)
   , _extra            :: !extra
   -- ^ Additional state
   }

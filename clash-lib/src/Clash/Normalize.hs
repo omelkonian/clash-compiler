@@ -20,7 +20,7 @@ module Clash.Normalize where
 import Data.Either
 
 import           Control.Concurrent.Supply        (Supply)
-import           Control.Lens                     ((.=),(^.),_1,_4)
+import           Control.Lens                     ((.=),(^.),(<>=),_1,_4)
 import qualified Control.Lens                     as Lens
 import           Data.Either                      (partitionEithers)
 import qualified Data.IntMap                      as IntMap
@@ -70,7 +70,8 @@ import           Clash.Primitives.Types           (CompiledPrimMap)
 import           Clash.Rewrite.Combinators        ((>->),(!->))
 import           Clash.Rewrite.Types
   (RewriteEnv (..), RewriteState (..), bindings, curFun, dbgLevel, extra,
-   tcCache, topEntities, typeTranslator, customReprs)
+   tcCache, topEntities, typeTranslator, customReprs,
+   RewriteStep (..), rewriteSteps)
 import           Clash.Rewrite.Util
   (apply, isUntranslatableType, runRewrite, runRewriteSession)
 import           Clash.Signal.Internal            (ResetKind (..))
@@ -121,6 +122,7 @@ runNormalization opts supply globals typeTrans reprs tcm tupTcm eval primMap rcs
                   (error $ $(curLoc) ++ "Report as bug: no curFun",noSrcSpan)
                   0
                   (IntMap.empty, 0)
+                  []
                   normState
 
     normState = NormalizeState
@@ -312,6 +314,10 @@ flattenCallTree (CBranch (nm,(nm',sp,inl,tm)) used) = do
                _  -> do -- To have a cheap `appProp` transformation we need to
                         -- deshadow, see also Note [AppProp no-shadow invariant]
                         let tm1 = deShadowTerm emptyInScopeSet (substTm "flattenCallTree.flattenExpr" subst tm)
+                        rewriteSteps <>= [ InlineStep { t_bndrS  = showPpr (varName nm')
+                                                      , t_before = tm
+                                                      , t_after  = tm1
+                                                      } ]
                         rewriteExpr ("flattenExpr",flatten) (showPpr nm, tm1) (nm', sp)
   let allUsed = newUsed ++ concat il_used
   -- inline all components when the resulting expression after flattening

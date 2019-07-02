@@ -9,6 +9,7 @@ packages:
   ./benchmark/*.cabal
   ./benchmark/profiling/prepare/*.cabal
   ./benchmark/profiling/run/*.cabal
+  ./clash-term/*.cabal
 
 allow-newer: *:Cabal, *:array, *:base, *:binary, *:^bytestring, *:containers,
   *:deepseq, *:directory, *:filepath, *:ghc, *:ghc-boot, *:ghc-boot-th,
@@ -29,7 +30,7 @@ repository head.hackage
 -- index state, to go along with the cabal.project.freeze file. update the index
 -- state by running `cabal update` twice and looking at the index state it
 -- displays to you (as the second update will be a no-op)
-index-state: 2019-02-18T09:58:03Z
+index-state: 2019-06-25T14:13:17Z
 
 package clash-ghc
   executable-dynamic: True

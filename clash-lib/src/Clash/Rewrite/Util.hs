@@ -23,13 +23,14 @@ module Clash.Rewrite.Util where
 import           Control.DeepSeq
 import           Control.Exception           (throw)
 import           Control.Lens
-  (Lens', (%=), (+=), (^.), _3, _4, _Left)
+  (Lens', (%=), (+=), (<>=), (^.), _3, _4, _Left)
 import qualified Control.Lens                as Lens
 import qualified Control.Monad               as Monad
 import           Control.Monad.Fail          (MonadFail)
 import qualified Control.Monad.State.Strict  as State
 import qualified Control.Monad.Writer        as Writer
 import           Data.Bifunctor              (bimap)
+import           Data.Binary                 (encodeFile)
 import           Data.Coerce                 (coerce)
 import           Data.Functor.Const          (Const (..))
 import           Data.List                   (group, sort)
@@ -40,6 +41,7 @@ import qualified Data.Set                    as Set
 import qualified Data.Set.Lens               as Lens
 import           Data.Text                   (Text)
 import qualified Data.Text                   as Text
+import           System.IO.Unsafe            (unsafePerformIO)
 
 import           BasicTypes                  (InlineSpec (..))
 import           SrcLoc                      (SrcSpan)
@@ -134,6 +136,14 @@ apply = \s rewrite ctx expr0 -> do
   let hasChanged = Monoid.getAny anyChanged
       !expr2     = if hasChanged then expr1 else expr0
   Monad.when hasChanged (transformCounter += 1)
+  Monad.when (hasChanged && debugIsOn) $ do
+    (curBndr, _) <- Lens.use curFun
+    rewriteSteps <>= [ RewriteStep { t_ctx    = tfContext ctx
+                                   , t_name   = s
+                                   , t_bndrS  = showPpr (varName curBndr)
+                                   , t_before = expr0
+                                   , t_after  = expr1
+                                   } ]
   if lvl == DebugNone
     then return expr2
     else applyDebug lvl s expr0 hasChanged expr2
@@ -220,17 +230,23 @@ runRewrite
   -> RewriteMonad extra Term
 runRewrite name is rewrite expr = apply name rewrite (TransformContext is []) expr
 
--- | Evaluate a RewriteSession to its inner monad
+-- | Evaluate a RewriteSession to its inner monad.
+-- NB: When DEBUG is on, emit binary data holding the recorded rewrite steps.
 runRewriteSession :: RewriteEnv
                   -> RewriteState extra
                   -> RewriteMonad extra a
                   -> a
-runRewriteSession r s m = traceIf True ("Clash: Applied " ++
-                                        show (s' ^. transformCounter) ++
-                                        " transformations")
-                                  a
+runRewriteSession r s m =
+  if debugIsOn then
+    unsafePerformIO $ do
+      encodeFile "history.dat" (s' ^. rewriteSteps)
+      return ret
+  else
+    ret
   where
     (a,s',_) = runR m r s
+    ret = traceIf True ("Clash: Applied " ++ show (s' ^. transformCounter) ++
+                        " transformations") a
 
 -- | Notify that a transformation has changed the expression
 setChanged :: RewriteMonad extra ()
